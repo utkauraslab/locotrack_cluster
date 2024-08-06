@@ -237,7 +237,7 @@ def track(
     ]) / torch.tensor([
         VIDEO_INPUT_RESO[1], VIDEO_INPUT_RESO[0]
     ])
-    tracks = tracks.numpy()
+    tracks = np.array(tracks)
 
 
     occlusion_logits = output['occlusion']
@@ -246,7 +246,8 @@ def track(
         expected_dist = output['expected_dist']
         pred_occ = 1 - (1 - pred_occ) * (1 - torch.sigmoid(expected_dist))
 
-    pred_occ = (pred_occ > 0.5)[0].cpu().numpy()
+    pred_occ = (pred_occ > 0.5)[0].cpu()
+    pred_occ = np.array(pred_occ)
 
     # make color array
     colors = []
