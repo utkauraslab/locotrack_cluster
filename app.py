@@ -131,6 +131,10 @@ def extract_feature(video_input, model_size="small"):
     with torch.autocast(device_type=device, dtype=dtype):
         with torch.no_grad():
             feature = model.get_feature_grids(video_input)
+
+    feature.lowres = feature.lowres.cpu()
+    feature.hires = feature.hires.cpu()
+    feature.highest = feature.highest.cpu()
     
     return feature
 
