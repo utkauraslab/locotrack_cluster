@@ -22,8 +22,6 @@ FRAME_LIMIT = 300 # Limit the number of frames to process
 
 
 def get_point(frame_num, video_queried_preview, query_points, query_points_color, query_count, evt: gr.SelectData):
-    print(f"You selected {(evt.index[0], evt.index[1], frame_num)}")
-
     current_frame = video_queried_preview[int(frame_num)]
 
     # Get the mouse click
@@ -32,7 +30,6 @@ def get_point(frame_num, video_queried_preview, query_points, query_points_color
     # Choose the color for the point from matplotlib colormap
     color = matplotlib.colormaps.get_cmap("gist_rainbow")(query_count % 20 / 20)
     color = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
-    print(f"Color: {color}")
     query_points_color[int(frame_num)].append(color)
 
     # Draw the point on the frame
