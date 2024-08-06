@@ -1,6 +1,6 @@
 ---
 title: LocoTrack
-emoji: 📊
+emoji: 🐈
 colorFrom: yellow
 colorTo: yellow
 sdk: gradio
