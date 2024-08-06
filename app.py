@@ -133,10 +133,10 @@ def extract_feature(video_input, model_size="small"):
             feature = model.get_feature_grids(video_input)
 
     feature = FeatureGrids(
-        lowres=(feature.lowres[0].cpu(),),
-        hires=(feature.hires[0].cpu(),),
-        highest=(feature.highest[0].cpu(),),
-        resolutions=feature.resolutions,
+        lowres=(feature.lowres[-1].cpu(),),
+        hires=(feature.hires[-1].cpu(),),
+        highest=(feature.highest[-1].cpu(),),
+        resolutions=(feature.resolutions[-1],),
     )
     return feature
 
@@ -203,10 +203,10 @@ def track(
     dtype = torch.bfloat16 if device == "cuda" else torch.float16
 
     video_feature = FeatureGrids(
-        lowres=(video_feature.lowres[0].to(device, dtype),),
-        hires=(video_feature.hires[0].to(device, dtype),),
-        highest=(video_feature.highest[0].to(device, dtype),),
-        resolutions=video_feature.resolutions,
+        lowres=(video_feature.lowres[-1].to(device, dtype),),
+        hires=(video_feature.hires[-1].to(device, dtype),),
+        highest=(video_feature.highest[-1].to(device, dtype),),
+        resolutions=(video_feature.resolutions[-1],),
     )
 
     # Convert query points to tensor, normalize to input resolution
