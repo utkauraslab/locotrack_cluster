@@ -132,9 +132,9 @@ def extract_feature(video_input, model_size="small"):
         with torch.no_grad():
             feature = model.get_feature_grids(video_input)
 
-    feature.lowres = feature.lowres.cpu()
-    feature.hires = feature.hires.cpu()
-    feature.highest = feature.highest.cpu()
+    feature.lowres = (x.cpu() for x in feature.lowres)
+    feature.hires = (x.cpu() for x in feature.hires)
+    feature.highest = (x.cpu() for x in feature.highest)
     
     return feature
 
