@@ -19,6 +19,10 @@ PREVIEW_WIDTH = 768 # Width of the preview video
 VIDEO_INPUT_RESO = (256, 256) # Resolution of the input video
 POINT_SIZE = 4 # Size of the query point in the preview video
 FRAME_LIMIT = 300 # Limit the number of frames to process
+WEIGHTS_PATH = {
+    "small": "./weights/locotrack_small.ckpt",
+    "base": "./weights/locotrack_base.ckpt",
+}
 
 
 def get_point(frame_num, video_queried_preview, query_points, query_points_color, query_count, evt: gr.SelectData):
@@ -120,7 +124,7 @@ def extract_feature(video_input, model_size="small"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" else torch.float16
 
-    model = load_model(model_size=model_size).to(device)
+    model = load_model(WEIGHTS_PATH[model_size], model_size=model_size).to(device)
 
     video_input = (video_input / 255.0) * 2 - 1
     video_input = torch.tensor(video_input).unsqueeze(0).to(device, dtype)
@@ -223,7 +227,7 @@ def track(
     video_input = (video_input / 255.0) * 2 - 1
     video_input = torch.tensor(video_input).unsqueeze(0).to(device, dtype)
 
-    model = load_model(model_size=model_size).to(device)
+    model = load_model(WEIGHTS_PATH[model_size], model_size=model_size).to(device)
     with torch.autocast(device_type=device, dtype=dtype):
         with torch.no_grad():
             output = model(video_input, query_points_tensor, feature_grids=video_feature)

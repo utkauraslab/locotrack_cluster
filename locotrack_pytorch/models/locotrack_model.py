@@ -22,6 +22,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
+from einops import rearrange
 
 from models import nets, utils
 from models.cmdtop import CMDTop
@@ -57,15 +58,15 @@ def posenc(x, min_deg, max_deg, legacy_posenc_order=False):
     return torch.cat([x] + [four_feat], dim=-1)
 
 
-def get_relative_positions(seq_len, reverse=False):
-    x = torch.arange(seq_len)[None, :]
-    y = torch.arange(seq_len)[:, None]
+def get_relative_positions(seq_len, reverse=False, device='cuda'):
+    x = torch.arange(seq_len, device=device)[None, :]
+    y = torch.arange(seq_len, device=device)[:, None]
     return torch.tril(x - y) if not reverse else torch.triu(y - x)
 
 
-def get_alibi_slope(num_heads):
+def get_alibi_slope(num_heads, device='cuda'):
     x = (24) ** (1 / num_heads)
-    return torch.tensor([1 / x ** (i + 1) for i in range(num_heads)], dtype=torch.float32).view(-1, 1, 1)
+    return torch.tensor([1 / x ** (i + 1) for i in range(num_heads)], device=device, dtype=torch.float32).view(-1, 1, 1)
 
 
 class MultiHeadAttention(nn.Module):
@@ -92,31 +93,22 @@ class MultiHeadAttention(nn.Module):
         key_heads = self._linear_projection(key, self.key_size, self.key_proj)  # [T, H, K]
         value_heads = self._linear_projection(value, self.value_size, self.value_proj)  # [T, H, V]
 
-        bias_forward = get_alibi_slope(self.num_heads // 2) * get_relative_positions(sequence_length)
+        device = query.device
+        bias_forward = get_alibi_slope(self.num_heads // 2, device=device) * get_relative_positions(sequence_length, device=device)
         bias_forward = bias_forward + torch.triu(torch.full_like(bias_forward, -1e9), diagonal=1)
-        bias_backward = get_alibi_slope(self.num_heads // 2) * get_relative_positions(sequence_length, reverse=True)
+        bias_backward = get_alibi_slope(self.num_heads // 2, device=device) * get_relative_positions(sequence_length, reverse=True, device=device)
         bias_backward = bias_backward + torch.tril(torch.full_like(bias_backward, -1e9), diagonal=-1)
-        attn_bias = torch.cat([bias_forward, bias_backward], dim=0).to(query.device)
+        attn_bias = torch.cat([bias_forward, bias_backward], dim=0)
 
-        attn_logits = torch.einsum("...thd,...Thd->...htT", query_heads, key_heads)
-        attn_logits = attn_logits / np.sqrt(self.key_size) + attn_bias
-
-        if mask is not None:
-            if mask.ndim != attn_logits.ndim:
-                raise ValueError(f"Mask dimensionality {mask.ndim} must match logits dimensionality {attn_logits.ndim}.")
-            attn_logits = torch.where(mask, attn_logits, torch.tensor(-1e30))
-
-        attn_weights = F.softmax(attn_logits, dim=-1)  # [H, T', T]
-
-        attn = torch.einsum("...htT,...Thd->...thd", attn_weights, value_heads)
-        attn = attn.reshape(batch_size, sequence_length, -1)  # [T', H*V]
+        attn = F.scaled_dot_product_attention(query_heads, key_heads, value_heads, attn_mask=attn_bias, scale=1 / np.sqrt(self.key_size))
+        attn = attn.permute(0, 2, 1, 3).reshape(batch_size, sequence_length, -1)
 
         return self.final_proj(attn)  # [T', D']
 
     def _linear_projection(self, x, head_size, proj_layer):
         y = proj_layer(x)
-        *leading_dims, _ = x.shape
-        return y.reshape((*leading_dims, self.num_heads, head_size))
+        batch_size, sequence_length, _= x.shape
+        return y.reshape((batch_size, sequence_length, self.num_heads, head_size)).permute(0, 2, 1, 3)
 
 
 class Transformer(nn.Module):
@@ -495,25 +487,25 @@ class LocoTrack(nn.Module):
       ctx = torch.reshape(ctx, [-1, 3]).to(video.device) # s*s 3
 
       position_support = position_in_grid[..., None, :] + ctx[None, None, ...] # b n s*s 3
-      position_support = utils.einshape('bnsc->b(ns)c', position_support)
+      position_support = rearrange(position_support, 'b n s c -> b (n s) c')
       interp_supp = utils.map_coordinates_3d(
           feature_grid[i], position_support
       )
-      interp_supp = utils.einshape('b(nhw)c->bnhwc', interp_supp, h=support_size, w=support_size)
+      interp_supp = rearrange(interp_supp, 'b (n h w) c -> b n h w c', h=support_size, w=support_size)
 
       position_support_hires = position_in_grid_hires[..., None, :] + ctx[None, None, ...]
-      position_support_hires = utils.einshape('bnsc->b(ns)c', position_support_hires)
+      position_support_hires = rearrange(position_support_hires, 'b n s c -> b (n s) c')
       hires_interp_supp = utils.map_coordinates_3d(
           hires_feats[i], position_support_hires
       )
-      hires_interp_supp = utils.einshape('b(nhw)c->bnhwc', hires_interp_supp, h=support_size, w=support_size)
+      hires_interp_supp = rearrange(hires_interp_supp, 'b (n h w) c -> b n h w c', h=support_size, w=support_size)
 
       position_support_highest = position_in_grid_highest[..., None, :] + ctx[None, None, ...]
-      position_support_highest = utils.einshape('bnsc->b(ns)c', position_support_highest)
+      position_support_highest = rearrange(position_support_highest, 'b n s c -> b (n s) c')
       highest_interp_supp = utils.map_coordinates_3d(
           highest_feats[i], position_support_highest
       )
-      highest_interp_supp = utils.einshape('b(nhw)c->bnhwc', highest_interp_supp, h=support_size, w=support_size)
+      highest_interp_supp = rearrange(highest_interp_supp, 'b (n h w) c -> b n h w c', h=support_size, w=support_size)
 
       interp_features = interp_supp[..., support_size // 2, support_size // 2, :]
       hires_interp = hires_interp_supp[..., support_size // 2, support_size // 2, :]
@@ -559,7 +551,7 @@ class LocoTrack(nn.Module):
           video.shape[2:4], self.initial_resolution
       )
 
-    all_required_resolutions = [self.initial_resolution]
+    all_required_resolutions = []
     all_required_resolutions.extend(refinement_resolutions)
 
     feature_grid = []
@@ -715,30 +707,14 @@ class LocoTrack(nn.Module):
     )
 
     num_queries = query_features.lowres[0].shape[1]
-    if causal_context is None:
-      perm = torch.randperm(num_queries)
-    else:
-      perm = torch.arange(num_queries)
-
-    inv_perm = torch.zeros_like(perm)
-    inv_perm[perm] = torch.arange(num_queries)
 
     for ch in range(0, num_queries, query_chunk_size):
-      perm_chunk = perm[ch : ch + query_chunk_size]
-      chunk = query_features.lowres[0][:, perm_chunk]
-      chunk_hires = query_features.hires[0][:, perm_chunk]
-
-      cc_chunk = []
-      if causal_context is not None:
-        for d in range(len(causal_context)):
-          tmp_dict = {}
-          for k, v in causal_context[d].items():
-            tmp_dict[k] = v[:, perm_chunk]
-          cc_chunk.append(tmp_dict)
+      chunk = query_features.lowres[0][:, ch:ch + query_chunk_size]
+      chunk_hires = query_features.hires[0][:, ch:ch + query_chunk_size]
 
       if query_points_in_video is not None:
         infer_query_points = query_points_in_video[
-            :, perm[ch : ch + query_chunk_size]
+            :, ch : ch + query_chunk_size
         ]
         num_frames = feature_grids.lowres[0].shape[1]
         infer_query_points = utils.convert_grid_coordinates(
@@ -765,14 +741,14 @@ class LocoTrack(nn.Module):
       for i in range(num_iters):
         feature_level = -1
         queries = [
-            query_features.hires[feature_level][:, perm_chunk],
-            query_features.lowres[feature_level][:, perm_chunk],
-            query_features.highest[feature_level][:, perm_chunk],
+            query_features.hires[feature_level][:, ch:ch + query_chunk_size],
+            query_features.lowres[feature_level][:, ch:ch + query_chunk_size],
+            query_features.highest[feature_level][:, ch:ch + query_chunk_size],
         ]
         supports = [
-            query_features.hires_supp[feature_level][:, perm_chunk],
-            query_features.lowres_supp[feature_level][:, perm_chunk],
-            query_features.highest_supp[feature_level][:, perm_chunk],
+            query_features.hires_supp[feature_level][:, ch:ch + query_chunk_size],
+            query_features.lowres_supp[feature_level][:, ch:ch + query_chunk_size],
+            query_features.highest_supp[feature_level][:, ch:ch + query_chunk_size],
         ]
         for _ in range(self.pyramid_level):
           queries.append(queries[-1])
@@ -790,7 +766,7 @@ class LocoTrack(nn.Module):
                   padding=0,
               )
           )
-        cc = cc_chunk[i] if causal_context is not None else None
+
         refined = self.refine_pips(
             queries,
             supports,
@@ -803,7 +779,6 @@ class LocoTrack(nn.Module):
             last_iter=mixer_feats,
             mixer_iter=i,
             resize_hw=feature_grids.resolutions[feature_level],
-            causal_context=cc,
             get_causal_context=get_causal_context,
             cost_volume=cost_volume
         )
@@ -822,9 +797,9 @@ class LocoTrack(nn.Module):
     points = []
     expd = []
     for i, _ in enumerate(occ_iters):
-      occlusion.append(torch.cat(occ_iters[i], dim=1)[:, inv_perm])
-      points.append(torch.cat(pts_iters[i], dim=1)[:, inv_perm])
-      expd.append(torch.cat(expd_iters[i], dim=1)[:, inv_perm])
+      occlusion.append(torch.cat(occ_iters[i], dim=1))
+      points.append(torch.cat(pts_iters[i], dim=1))
+      expd.append(torch.cat(expd_iters[i], dim=1))
 
     out = dict(
         occlusion=occlusion,
@@ -874,11 +849,11 @@ class LocoTrack(nn.Module):
       coords2 = coords.unsqueeze(3) + ctx.unsqueeze(0).unsqueeze(0).unsqueeze(0)
       neighborhood = utils.map_coordinates_2d(grid, coords2)
 
-      neighborhood = utils.einshape('bnt(hw)c->bnthwc', neighborhood, h=support_size, w=support_size)
+      neighborhood = rearrange(neighborhood, 'b n t (h w) c -> b n t h w c', h=support_size, w=support_size)
       patches_input = torch.einsum('bnthwc,bnijc->bnthwij', neighborhood, supp)
-      patches_input = utils.einshape('bnthwij->(bnt)hwij', patches_input)
+      patches_input = rearrange(patches_input, 'b n t h w i j -> (b n t) h w i j')
       patches_emb = self.cmdtop[pyridx](patches_input)
-      patches = utils.einshape('(bnt)c->bntc', patches_emb, b=neighborhood.shape[0], n=neighborhood.shape[1])
+      patches = rearrange(patches_emb, '(b n t) c -> b n t c', b=neighborhood.shape[0], n=neighborhood.shape[1])
 
       corrs_pyr.append(patches)
     corrs_pyr = torch.concatenate(corrs_pyr, dim=-1)
@@ -913,14 +888,10 @@ class LocoTrack(nn.Module):
     mlp_input_list.append(rel_pos_emb_input)
     mlp_input = torch.cat(mlp_input_list, axis=-1)
 
-    x = utils.einshape('bnfc->(bn)fc', mlp_input)
-
-    if causal_context is not None:
-      for k, v in causal_context.items():
-        causal_context[k] = utils.einshape('bn...->(bn)...', v)
+    x = rearrange(mlp_input, 'b n f c -> (b n) f c')
     res = self.torch_pips_mixer(x)
 
-    res = utils.einshape('(bn)fc->bnfc', res, b=mlp_input.shape[0])
+    res = rearrange(res, '(b n) f c -> b n f c', b=mlp_input.shape[0])
 
     pos_update = utils.convert_grid_coordinates(
         res[..., :2],
@@ -983,20 +954,18 @@ class LocoTrack(nn.Module):
     shape = cost_volume.shape
     batch_size, num_points = cost_volume.shape[1:3]
 
-    interp_cost = utils.einshape('tbnhw->(tbn)1hw', cost_volume)
+    interp_cost = rearrange(cost_volume, 't b n h w -> (t b n) () h w')
     interp_cost = F.interpolate(interp_cost, cost_volume_hires.shape[3:], mode='bilinear', align_corners=False)
-    # TODO: not sure if this is correct
-    interp_cost = utils.einshape('(tbn)1hw->tbnhw', interp_cost, b=batch_size, n=num_points)
+    interp_cost = rearrange(interp_cost, '(t b n) () h w -> t b n h w', b=batch_size, n=num_points)
     cost_volume_stack = torch.stack(
         [
-          # jax.image.resize(cost_volume, cost_volume_hires.shape, method='bilinear'),
           interp_cost,
           cost_volume_hires,
         ], dim=-1
     )
-    pos = utils.einshape('tbnhwc->(tbn)chw', cost_volume_stack)
+    pos = rearrange(cost_volume_stack, 't b n h w c -> (t b n) c h w')
     pos = self.cost_conv(pos)
-    pos = utils.einshape('(tbn)1hw->bnthw', pos, b=batch_size, n=num_points)
+    pos = rearrange(pos, '(t b n) () h w -> b n t h w', b=batch_size, n=num_points)
     
     pos_sm = pos.reshape(pos.size(0), pos.size(1), pos.size(2), -1)
     softmaxed = F.softmax(pos_sm * self.softmax_temperature, dim=-1)
@@ -1012,14 +981,10 @@ class LocoTrack(nn.Module):
       ], dim=-1
     )
     occlusion = self.occ_linear(occlusion)
-    expected_dist = utils.einshape(
-        'tbn1->bnt', occlusion[..., 1:2]
-    )
-    occlusion = utils.einshape(
-        'tbn1->bnt', occlusion[..., 0:1]
-    )
+    expected_dist = rearrange(occlusion[..., 1:2], 't b n () -> b n t', t=shape[0])
+    occlusion = rearrange(occlusion[..., 0:1], 't b n () -> b n t', t=shape[0])
 
-    return points, occlusion, expected_dist, utils.einshape('tbnhw->bnthw', cost_volume)
+    return points, occlusion, expected_dist, rearrange(cost_volume, 't b n h w -> b n t h w')
 
   def construct_initial_causal_state(self, num_points, num_resolutions=1):
     """Construct initial causal state."""

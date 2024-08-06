@@ -42,3 +42,5 @@ examples/libby.mp4 filter=lfs diff=lfs merge=lfs -text
 examples/motocross-jump.mp4 filter=lfs diff=lfs merge=lfs -text
 examples/bmx-trees.mp4 filter=lfs diff=lfs merge=lfs -text
 examples/parkour.mp4 filter=lfs diff=lfs merge=lfs -text
+weights/locotrack_base.ckpt filter=lfs diff=lfs merge=lfs -text
+weights/locotrack_small.ckpt filter=lfs diff=lfs merge=lfs -text
