@@ -11,7 +11,7 @@ import cv2
 import matplotlib
 import torch
 
-from locotrack_pytorch.models.locotrack_model import load_model
+from locotrack_pytorch.models.locotrack_model import load_model, FeatureGrids
 from viz_utils import paint_point_track
 
 
@@ -132,10 +132,12 @@ def extract_feature(video_input, model_size="small"):
         with torch.no_grad():
             feature = model.get_feature_grids(video_input)
 
-    feature.lowres = (x.cpu() for x in feature.lowres)
-    feature.hires = (x.cpu() for x in feature.hires)
-    feature.highest = (x.cpu() for x in feature.highest)
-    
+    feature = FeatureGrids(
+        lowres=(feature.lowres[0].cpu(),),
+        hires=(feature.hires[0].cpu(),),
+        highest=(feature.highest[0].cpu(),),
+        resolutions=feature.resolutions,
+    )
     return feature
 
 
