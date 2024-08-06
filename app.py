@@ -2,6 +2,7 @@ import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "locotrack_pytorch"))
 import uuid
+import spaces
 
 import gradio as gr
 import mediapy
@@ -117,7 +118,7 @@ def clear_all_fn(frame_num, video_preview):
 def choose_frame(frame_num, video_preview_array):
     return video_preview_array[int(frame_num)]
 
-
+@spaces.GPU
 def extract_feature(video_input, model_size="small"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" else torch.float16
@@ -177,6 +178,7 @@ def preprocess_video_input(video_path, model_size):
     )
 
 
+@spaces.GPU
 def track(
     model_size, 
     video_preview,
