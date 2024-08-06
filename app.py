@@ -202,6 +202,13 @@ def track(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" else torch.float16
 
+    video_feature = FeatureGrids(
+        lowres=(video_feature.lowres[0].to(device, dtype),),
+        hires=(video_feature.hires[0].to(device, dtype),),
+        highest=(video_feature.highest[0].to(device, dtype),),
+        resolutions=video_feature.resolutions,
+    )
+
     # Convert query points to tensor, normalize to input resolution
     query_points_tensor = []
     for frame_points in query_points:
