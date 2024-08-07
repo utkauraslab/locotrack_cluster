@@ -274,6 +274,12 @@ def track(
     return video_file_path
 
 
+def video_input_fn(video_path):
+    if video_path is None:
+        return gr.update(interactive=False)
+    return gr.update(interactive=True)
+
+
 with gr.Blocks() as demo:
     video = gr.State()
     video_queried_preview = gr.State()
@@ -317,7 +323,7 @@ with gr.Blocks() as demo:
                     inputs=[video_in],
                     examples_per_page=3
                 )
-                submit = gr.Button("Submit", scale=0)
+                submit = gr.Button("Submit", interactive=False, scale=0)
 
     
     gr.Markdown("## Second step: Add query points to the video, and click track.")
@@ -349,6 +355,12 @@ with gr.Blocks() as demo:
                 autoplay=True,
                 loop=True,
             )
+
+    video_in.change(
+        fn = video_input_fn,
+        inputs = [video_in],
+        outputs = [submit],
+    )
     
     submit.click(
         fn = preprocess_video_input, 
