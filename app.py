@@ -373,7 +373,7 @@ with gr.Blocks() as demo:
             clear_all,
             track_button,
         ],
-        queue = False
+        queue = True
     )
 
     query_frames.change(
